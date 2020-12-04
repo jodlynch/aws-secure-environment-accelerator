@@ -808,7 +808,7 @@ export const GlobalOptionsConfigType = t.interface({
   'default-s3-retention': t.number,
   'central-bucket': NonEmptyString,
   reports: ReportsConfigType,
-  zones: t.array(GlobalOptionsZonesConfigType),
+  zones: fromNullable(t.array(GlobalOptionsZonesConfigType), []),
   'security-hub-frameworks': SecurityHubFrameworksConfigType,
   'central-security-services': CentralServicesConfigType,
   'central-operations-services': CentralServicesConfigType,

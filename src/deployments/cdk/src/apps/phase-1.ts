@@ -478,48 +478,50 @@ export async function deploy({ acceleratorConfig, accountStacks, accounts, conte
    */
   const globalOptionsConfig = acceleratorConfig['global-options'];
   const zoneConfig = globalOptionsConfig.zones.find(zc => zc.names);
-  const zonesAccountKey = zoneConfig?.account!;
+  if (zoneConfig) {
+    const zonesAccountKey = zoneConfig.account;
+    const zonesStack = accountStacks.getOrCreateAccountStack(zonesAccountKey, DNS_LOGGING_LOG_GROUP_REGION);
+    const logGroupLambdaRoleOutput = IamRoleOutputFinder.tryFindOneByName({
+      outputs,
+      accountKey: zonesAccountKey,
+      roleKey: 'LogGroupRole',
+    });
 
-  const zonesStack = accountStacks.getOrCreateAccountStack(zonesAccountKey, DNS_LOGGING_LOG_GROUP_REGION);
-  const logGroupLambdaRoleOutput = IamRoleOutputFinder.tryFindOneByName({
-    outputs,
-    accountKey: zonesAccountKey,
-    roleKey: 'LogGroupRole',
-  });
-  if (logGroupLambdaRoleOutput) {
-    const logGroups =
-      zoneConfig?.names?.public.map(phz => {
-        const logGroupName = centralEndpoints.createR53LogGroupName({
+    if (logGroupLambdaRoleOutput) {
+      const logGroups =
+        zoneConfig?.names?.public.map(phz => {
+          const logGroupName = centralEndpoints.createR53LogGroupName({
+            acceleratorPrefix: context.acceleratorPrefix,
+            domain: phz,
+          });
+          return new LogGroup(zonesStack, `Route53HostedZoneLogGroup${pascalCase(phz)}`, {
+            logGroupName,
+            roleArn: logGroupLambdaRoleOutput.roleArn,
+          });
+        }) || [];
+
+      if (logGroups.length > 0) {
+        const wildcardLogGroupName = centralEndpoints.createR53LogGroupName({
           acceleratorPrefix: context.acceleratorPrefix,
-          domain: phz,
+          domain: '*',
         });
-        return new LogGroup(zonesStack, `Route53HostedZoneLogGroup${pascalCase(phz)}`, {
-          logGroupName,
-          roleArn: logGroupLambdaRoleOutput.roleArn,
-        });
-      }) || [];
 
-    if (logGroups.length > 0) {
-      const wildcardLogGroupName = centralEndpoints.createR53LogGroupName({
-        acceleratorPrefix: context.acceleratorPrefix,
-        domain: '*',
-      });
-
-      // Allow r53 services to write to the log group
-      const logGroupPolicy = new LogResourcePolicy(zonesStack, 'R53LogGroupPolicy', {
-        policyName: createName({
-          name: 'query-logging-pol',
-        }),
-        policyStatements: [
-          new iam.PolicyStatement({
-            actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
-            principals: [new iam.ServicePrincipal('route53.amazonaws.com')],
-            resources: [`arn:aws:logs:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:log-group:${wildcardLogGroupName}`],
+        // Allow r53 services to write to the log group
+        const logGroupPolicy = new LogResourcePolicy(zonesStack, 'R53LogGroupPolicy', {
+          policyName: createName({
+            name: 'query-logging-pol',
           }),
-        ],
-      });
-      for (const logGroup of logGroups) {
-        logGroupPolicy.node.addDependency(logGroup);
+          policyStatements: [
+            new iam.PolicyStatement({
+              actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+              principals: [new iam.ServicePrincipal('route53.amazonaws.com')],
+              resources: [`arn:aws:logs:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:log-group:${wildcardLogGroupName}`],
+            }),
+          ],
+        });
+        for (const logGroup of logGroups) {
+          logGroupPolicy.node.addDependency(logGroup);
+        }
       }
     }
   }
